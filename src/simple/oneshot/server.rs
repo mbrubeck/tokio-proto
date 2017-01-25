@@ -1,5 +1,8 @@
-use BindClient;
-use super::Pipeline;
+use std::io;
+use std::marker;
+
+use BindServer;
+use super::Oneshot;
 use super::lift::{LiftBind, LiftTransport};
 use simple::LiftProto;
 
@@ -7,12 +10,11 @@ use streaming::{self, Message};
 use streaming::pipeline::StreamingPipeline;
 use tokio_core::reactor::Handle;
 use tokio_service::Service;
-use futures::{stream, Stream, Sink, Future, Poll, IntoFuture};
-use std::io;
+use futures::{stream, Stream, Sink, Future, IntoFuture, Poll};
 
 type MyStream<E> = stream::Empty<(), E>;
 
-/// A pipelined client protocol.
+/// A one-shot server protocol.
 ///
 /// The `T` parameter is used for the I/O object used to communicate, which is
 /// supplied in `bind_transport`.
@@ -20,7 +22,7 @@ type MyStream<E> = stream::Empty<(), E>;
 /// For simple protocols, the `Self` type is often a unit struct. In more
 /// advanced cases, `Self` may contain configuration information that is used
 /// for setting up the transport in `bind_transport`.
-pub trait ClientProto<T: 'static>: 'static {
+pub trait ServerProto<T: 'static>: 'static {
     /// Request messages.
     type Request: 'static;
 
@@ -33,8 +35,8 @@ pub trait ClientProto<T: 'static>: 'static {
     /// together with a `Codec`; in that case, the transport type is
     /// `Framed<T, YourCodec>`. See the crate docs for an example.
     type Transport: 'static +
-        Stream<Item = Self::Response, Error = io::Error> +
-        Sink<SinkItem = Self::Request, SinkError = io::Error>;
+        Stream<Item = Self::Request, Error = io::Error> +
+        Sink<SinkItem = Self::Response, SinkError = io::Error>;
 
     /// A future for initializing a transport from an I/O object.
     ///
@@ -50,24 +52,24 @@ pub trait ClientProto<T: 'static>: 'static {
     fn bind_transport(&self, io: T) -> Self::BindTransport;
 }
 
-impl<T: 'static, P: ClientProto<T>> BindClient<Pipeline, T> for P {
+impl<T: 'static, P: ServerProto<T>> BindServer<Oneshot, T> for P {
     type ServiceRequest = P::Request;
     type ServiceResponse = P::Response;
     type ServiceError = io::Error;
 
-    type BindClient = ClientService<T, P>;
-
-    fn bind_client(&self, handle: &Handle, io: T) -> Self::BindClient {
-        ClientService {
-            inner: BindClient::<StreamingPipeline<MyStream<io::Error>>, T>::bind_client(
-                LiftProto::from_ref(self), handle, io
-            )
-        }
+    fn bind_server<S>(&self, handle: &Handle, io: T, service: S)
+        where S: Service<Request = Self::ServiceRequest,
+                         Response = Self::ServiceResponse,
+                         Error = io::Error> + 'static
+    {
+        BindServer::<StreamingPipeline<MyStream<io::Error>>, T>::bind_server(
+            LiftProto::from_ref(self), handle, io, LiftService(service)
+        )
     }
 }
 
-impl<T, P> streaming::pipeline::ClientProto<T> for LiftProto<P, Pipeline> where
-    T: 'static, P: ClientProto<T>
+impl<T, P> streaming::pipeline::ServerProto<T> for LiftProto<P, Oneshot> where
+    T: 'static, P: ServerProto<T>
 {
     type Request = P::Request;
     type RequestBody = ();
@@ -81,49 +83,36 @@ impl<T, P> streaming::pipeline::ClientProto<T> for LiftProto<P, Pipeline> where
     type BindTransport = LiftBind<T, <P::BindTransport as IntoFuture>::Future, io::Error>;
 
     fn bind_transport(&self, io: T) -> Self::BindTransport {
-        LiftBind::lift(ClientProto::bind_transport(self.lower(), io).into_future())
+        LiftBind::lift(ServerProto::bind_transport(self.lower(), io).into_future())
     }
 }
 
-/// Client `Service` for simple pipeline protocols
-pub struct ClientService<T, P> where T: 'static, P: ClientProto<T> {
-    inner: <LiftProto<P, Pipeline> as BindClient<StreamingPipeline<MyStream<io::Error>>, T>>::BindClient
-}
+struct LiftService<S>(S);
 
-impl<T, P> Clone for ClientService<T, P> where T: 'static, P: ClientProto<T> {
-    fn clone(&self) -> Self {
-        ClientService {
-            inner: self.inner.clone(),
-        }
-    }
-}
+impl<S: Service> Service for LiftService<S> {
+    type Request = streaming::Message<S::Request, streaming::Body<(), S::Error>>;
+    type Response = streaming::Message<S::Response, MyStream<S::Error>>;
+    type Error = S::Error;
+    type Future = LiftFuture<S::Future, stream::Empty<(), S::Error>>;
 
-impl<T, P> Service for ClientService<T, P> where T: 'static, P: ClientProto<T> {
-    type Request = P::Request;
-    type Response = P::Response;
-    type Error = io::Error;
-    type Future = ClientFuture<T, P>;
-
-    fn call(&self, req: P::Request) -> Self::Future {
-        ClientFuture {
-            inner: self.inner.call(Message::WithoutBody(req))
-        }
-    }
-}
-
-pub struct ClientFuture<T, P> where T: 'static, P: ClientProto<T> {
-    inner: <<LiftProto<P, Pipeline> as BindClient<StreamingPipeline<MyStream<io::Error>>, T>>::BindClient
-            as Service>::Future
-}
-
-impl<T, P> Future for ClientFuture<T, P> where P: ClientProto<T> {
-    type Item = P::Response;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match try_ready!(self.inner.poll()) {
-            Message::WithoutBody(msg) => Ok(msg.into()),
+    fn call(&self, req: Self::Request) -> Self::Future {
+        match req {
+            Message::WithoutBody(msg) => {
+                LiftFuture(self.0.call(msg), marker::PhantomData)
+            }
             Message::WithBody(..) => panic!("bodies not supported"),
         }
+    }
+}
+
+struct LiftFuture<F, T>(F, marker::PhantomData<fn() -> T>);
+
+impl<F: Future, T> Future for LiftFuture<F, T> {
+    type Item = Message<F::Item, T>;
+    type Error = F::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let item = try_ready!(self.0.poll());
+        Ok(Message::WithoutBody(item).into())
     }
 }

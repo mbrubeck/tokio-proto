@@ -68,7 +68,7 @@ impl<T: 'static, P: ServerProto<T>> BindServer<Pipeline, T> for P {
     }
 }
 
-impl<T, P> streaming::pipeline::ServerProto<T> for LiftProto<P> where
+impl<T, P> streaming::pipeline::ServerProto<T> for LiftProto<P, Pipeline> where
     T: 'static, P: ServerProto<T>
 {
     type Request = P::Request;

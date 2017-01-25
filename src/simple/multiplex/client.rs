@@ -67,7 +67,7 @@ impl<T: 'static, P: ClientProto<T>> BindClient<Multiplex, T> for P {
     }
 }
 
-impl<T, P> streaming::multiplex::ClientProto<T> for LiftProto<P> where
+impl<T, P> streaming::multiplex::ClientProto<T> for LiftProto<P, Multiplex> where
     T: 'static, P: ClientProto<T>
 {
     type Request = P::Request;
@@ -88,7 +88,7 @@ impl<T, P> streaming::multiplex::ClientProto<T> for LiftProto<P> where
 
 /// Client `Service` for simple multiplex protocols
 pub struct ClientService<T, P> where T: 'static, P: ClientProto<T> {
-    inner: <LiftProto<P> as BindClient<StreamingMultiplex<MyStream<io::Error>>, T>>::BindClient
+    inner: <LiftProto<P, Multiplex> as BindClient<StreamingMultiplex<MyStream<io::Error>>, T>>::BindClient
 }
 
 impl<T, P> Service for ClientService<T, P> where T: 'static, P: ClientProto<T> {
@@ -113,7 +113,7 @@ impl<T, P> Clone for ClientService<T, P> where T: 'static, P: ClientProto<T> {
 }
 
 pub struct ClientFuture<T, P> where T: 'static, P: ClientProto<T> {
-    inner: <<LiftProto<P> as BindClient<StreamingMultiplex<MyStream<io::Error>>, T>>::BindClient
+    inner: <<LiftProto<P, Multiplex> as BindClient<StreamingMultiplex<MyStream<io::Error>>, T>>::BindClient
             as Service>::Future
 }
 

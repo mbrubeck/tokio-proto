@@ -1,4 +1,7 @@
+use std::marker::PhantomData;
+
 pub mod pipeline;
+pub mod oneshot;
 pub mod multiplex;
 
 // A utility struct to enable "lifting" from an RPC to a streaming proto, which
@@ -14,10 +17,10 @@ pub mod multiplex;
 // Thus, we use a newtype over the actual protocol type, which requires a bit of
 // transmute hackery to transform references. Since newtypes are guaranteed not
 // to change layout, this is kosher.
-struct LiftProto<P>(P);
+struct LiftProto<P, Kind>(P, PhantomData<Kind>);
 
-impl<P> LiftProto<P> {
-    fn from_ref(proto: &P) -> &LiftProto<P> {
+impl<P, K> LiftProto<P, K> {
+    fn from_ref(proto: &P) -> &LiftProto<P, K> {
         unsafe { ::std::mem::transmute(proto) }
     }
 
