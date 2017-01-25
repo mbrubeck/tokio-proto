@@ -77,7 +77,7 @@ impl<T, P> streaming::pipeline::ClientProto<T> for LiftProto<P> where
 
     type Error = io::Error;
 
-    type Transport = LiftTransport<P::Transport, io::Error>;
+    type Transport = LiftTransport<stream::Take<P::Transport>, io::Error>;
     type BindTransport = LiftBind<T, <P::BindTransport as IntoFuture>::Future, io::Error>;
 
     fn bind_transport(&self, io: T) -> Self::BindTransport {

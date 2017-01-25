@@ -22,7 +22,7 @@ mod lift {
     use std::marker::PhantomData;
 
     use streaming::pipeline::{Frame, Transport};
-    use futures::{Future, Stream, Sink, StartSend, Poll, Async, AsyncSink};
+    use futures::{Future, stream, Stream, Sink, StartSend, Poll, Async, AsyncSink};
 
     // Lifts an implementation of RPC-style transport to streaming-style transport
     pub struct LiftTransport<T, E>(pub T, pub PhantomData<E>);
@@ -83,12 +83,15 @@ mod lift {
         }
     }
 
-    impl<A, F, E> Future for LiftBind<A, F, E> where F: Future<Error = io::Error> {
-        type Item = LiftTransport<F::Item, E>;
+    impl<A, F, E> Future for LiftBind<A, F, E> where F: Future<Error = io::Error>,
+                                                     F::Item: Stream {
+        type Item = LiftTransport<stream::Take<F::Item>, E>;
         type Error = io::Error;
 
         fn poll(&mut self) -> Poll<Self::Item, io::Error> {
-            Ok(Async::Ready(LiftTransport(try_ready!(self.fut.poll()), PhantomData)))
+            Ok(Async::Ready(LiftTransport(
+                try_ready!(self.fut.poll().map(|a| a.map(|s| s.take(1)))),
+                PhantomData)))
         }
     }
 }
