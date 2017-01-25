@@ -25,7 +25,11 @@ mod lift {
     use futures::{Future, Stream, Sink, StartSend, Poll, Async, AsyncSink};
 
     // Lifts an implementation of RPC-style transport to streaming-style transport
-    pub struct LiftTransport<T, E>(pub T, pub PhantomData<E>);
+    pub struct LiftTransport<T, E> {
+        pub inner: T,
+        pub done: bool,
+        pub marker: PhantomData<E>
+    }
 
     // Lifts the Bind from the underlying transport
     pub struct LiftBind<A, F, E> {
@@ -38,7 +42,11 @@ mod lift {
         type Error = io::Error;
 
         fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
-            let item = try_ready!(self.0.poll());
+            if self.done {
+                return Ok(None.into());
+            }
+            self.done = true;
+            let item = try_ready!(self.inner.poll());
             Ok(item.map(|msg| {
                 Frame::Message { message: msg, body: false }
             }).into())
@@ -53,7 +61,7 @@ mod lift {
                       -> StartSend<Self::SinkItem, io::Error> {
             if let Frame::Message { message, body } = request {
                 if !body {
-                    match try!(self.0.start_send(message)) {
+                    match try!(self.inner.start_send(message)) {
                         AsyncSink::Ready => return Ok(AsyncSink::Ready),
                         AsyncSink::NotReady(msg) => {
                             let msg = Frame::Message { message: msg, body: false };
@@ -66,7 +74,7 @@ mod lift {
         }
 
         fn poll_complete(&mut self) -> Poll<(), io::Error> {
-            self.0.poll_complete()
+            self.inner.poll_complete()
         }
     }
 
@@ -88,7 +96,11 @@ mod lift {
         type Error = io::Error;
 
         fn poll(&mut self) -> Poll<Self::Item, io::Error> {
-            Ok(Async::Ready(LiftTransport(try_ready!(self.fut.poll()), PhantomData)))
+            Ok(Async::Ready(LiftTransport {
+                inner: try_ready!(self.fut.poll()),
+                done: false,
+                marker: PhantomData,
+            }))
         }
     }
 }
