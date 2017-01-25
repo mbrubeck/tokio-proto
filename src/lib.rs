@@ -9,16 +9,21 @@
 //! Here, a **protocol** is a way of providing or consuming a service. Protocols
 //! are implemented via traits, which are arranged into a taxonomy:
 //!
+//! - `oneshot::{ClientProto, ServerProto}`
 //! - `pipeline::{ClientProto, ServerProto}`
 //! - `multiplex::{ClientProto, ServerProto}`
 //! - `streaming::pipeline::{ClientProto, ServerProto}`
 //! - `streaming::multiplex::{ClientProto, ServerProto}`
 //!
-//! ### Pipeline vs multiplex
+//! ### One-shot vs pipeline vs multiplex
 //!
-//! By default, protocols allow a client to transmit multiple requests without
-//! waiting for the corresponding responses, which is commonly used to improve
-//! the throughput of single connections.
+//! In a **one-shot** protocol, each connection is used for only a single
+//! request followed by a single response.  After the response, the server
+//! closes the connection.
+//!
+//! In contrast, pipelined and multiplexed protocols allow a client to transmit
+//! multiple requests without waiting for the corresponding responses, which is
+//! commonly used to improve the throughput of single connections.
 //!
 //! In a **pipelined protocol**, the server responds to client requests in the
 //! order they were sent. Example pipelined protocols include HTTP/1.1 and Redis.
@@ -190,7 +195,7 @@ extern crate futures;
 extern crate log;
 
 mod simple;
-pub use simple::{pipeline, multiplex};
+pub use simple::{oneshot, pipeline, multiplex};
 
 pub mod streaming;
 pub mod util;
@@ -212,6 +217,7 @@ mod buffer_one;
 /// This trait is not intended to be implemented directly; instead, implement
 /// one of the server protocol traits:
 ///
+/// - `oneshot::ServerProto`
 /// - `pipeline::ServerProto`
 /// - `multiplex::ServerProto`
 /// - `streaming::pipeline::ServerProto`
@@ -248,6 +254,7 @@ pub trait BindServer<Kind, T: 'static>: 'static {
 /// This trait is not intended to be implemented directly; instead, implement
 /// one of the server protocol traits:
 ///
+/// - `oneshot::ClientProto`
 /// - `pipeline::ClientProto`
 /// - `multiplex::ClientProto`
 /// - `streaming::pipeline::ClientProto`

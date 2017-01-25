@@ -1,3 +1,4 @@
+pub mod oneshot;
 pub mod pipeline;
 pub mod multiplex;
 
