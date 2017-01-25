@@ -21,7 +21,7 @@ mod lift {
     use std::io;
     use std::marker::PhantomData;
 
-    use streaming::pipeline::{Frame, Transport};
+    use streaming::pipeline::Frame;
     use futures::{Future, Stream, Sink, StartSend, Poll, Async, AsyncSink};
 
     // Lifts an implementation of RPC-style transport to streaming-style transport
@@ -69,10 +69,6 @@ mod lift {
             self.0.poll_complete()
         }
     }
-
-    impl<T, E: 'static> Transport for LiftTransport<T, E>
-        where T: 'static + Stream<Error = io::Error> + Sink<SinkError = io::Error>
-    {}
 
     impl<A, F, E> LiftBind<A, F, E> {
         pub fn lift(f: F) -> LiftBind<A, F, E> {
